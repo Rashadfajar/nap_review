@@ -149,6 +149,8 @@
     const pages = [];   // {pageNum, canvas, lnCol, totalLines, sectionName}
     const comments = [];
     const highlights = []; // Array to store highlights for each page.
+    const viewerPane = document.getElementById('viewerPane');
+
 
     /* ===== DOM ===== */
     const fileInput = document.getElementById('fileInput');
@@ -203,27 +205,79 @@
       highlights[pageNum - 1] = positions;  // Store the highlights for the page
     }
 
-    function goTo(pageNum, yPdf = null) {
-      const target = document.getElementById(`page-${pageNum}`);
-      if (!target) return;
-      
-      // Scroll secara otomatis ke halaman yang tepat
-      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      
+    function goTo(pageNum, yPdf = null, destType = null) {
       const pg = pages[pageNum - 1];
+      if (!pg) return;
 
-      if (yPdf !== null && !isNaN(yPdf)) {
-        const yCanvas = pg.canvas.height - (yPdf * scale);
-        const line = Math.max(1, Math.min(pg.totalLines, Math.round(yCanvas / lineHeight)));
-        
-        highlightLine(pageNum - 1, line); // Highlight bagian yang relevan
-        setCurrent(pageNum, line);  // Menampilkan informasi page dan line
+      // Posisi atas elemen halaman relatif terhadap container scroll (viewerPane)
+      const pageTop = pg.wrap.offsetTop;
+
+      // Default: scroll to top of the page
+      let targetTop = pageTop;
+
+      // Jika ada koordinat Y dari PDF, konversi ke piksel kanvas pada skala aktif
+      if (yPdf !== null && !isNaN(yPdf) && pg.viewport) {
+        // Pada PDF.js, sumbu-Y dimulai dari bawah; kanvas dari atas.
+        // Jadi: yCanvas = viewport.height - (yPdf * scale)
+        const yCanvas = pg.viewport.height - (yPdf * 1); // yPdf pada scale=1
+        targetTop = pageTop + (yCanvas * (pg.canvas.height / pg.viewport.height));
       }
-      
-      // Memberikan efek flash pada halaman untuk menandai
+
+      // Smooth scroll di panel tengah
+      viewerPane.scrollTo({ top: Math.max(0, targetTop - 12), behavior: 'smooth' });
+
+      // Hit highlight garis + status
+      if (yPdf !== null && !isNaN(yPdf)) {
+        const yCanvas = pg.viewport.height - (yPdf * 1);
+        const yOnCanvas = yCanvas * (pg.canvas.height / pg.viewport.height);
+        const line = Math.max(1, Math.min(pg.totalLines, Math.round(yOnCanvas / lineHeight)));
+        highlightLine(pageNum - 1, line);
+        setCurrent(pageNum, line);
+      }
+
       pg.canvas.classList.add('flash');
       setTimeout(() => pg.canvas.classList.remove('flash'), 600);
     }
+
+    async function resolveDest(item) {
+      // item.dest bisa string (named destination) atau array
+      let destArray = null;
+
+      if (typeof item.dest === 'string') {
+        const named = await pdfDoc.getDestination(item.dest);
+        if (named) destArray = named;
+      } else if (Array.isArray(item.dest)) {
+        destArray = item.dest;
+      }
+
+      if (!destArray) return { pageIndex: null, yPdf: null, destType: null };
+
+      // Elemen pertama adalah ref ke page
+      const ref = destArray[0];
+      const pageIndex = await pdfDoc.getPageIndex(ref);
+
+      // Elemen kedua biasanya dictionary untuk type (XYZ, FitH, Fit, dsb.)
+      // Lihat https://mozilla.github.io/pdf.js/ API Destinations
+      let destType = null;
+      try {
+        destType = destArray[1]?.name || null;
+      } catch { destType = null; }
+
+      // Ambil Y jika ada (XYZ/FitH/FitR cenderung punya y di indeks 3 atau 2)
+      let yPdf = null;
+      if (destType === 'XYZ') {
+        yPdf = typeof destArray[3] === 'number' ? destArray[3] : null;
+      } else if (destType === 'FitH' || destType === 'FitBH') {
+        yPdf = typeof destArray[2] === 'number' ? destArray[2] : null;
+      } else {
+        // Untuk Fit/FitV/FitB/FitR tidak selalu ada Y — fallback ke top halaman
+        yPdf = null;
+      }
+
+      return { pageIndex, yPdf, destType };
+    }
+
+
 
     /* ===== Render PDF ===== */
     async function renderPDF(buf) {
@@ -258,7 +312,7 @@
         wrap.appendChild(lnCol); wrap.appendChild(canvas); pdfContainer.appendChild(wrap);
         await page.render({ canvasContext: ctx, viewport }).promise;
 
-        pages.push({ pageNum: p, canvas, lnCol, totalLines: total });
+        pages.push({ pageNum: p, wrap, canvas, lnCol, totalLines: total, viewport });
       }
 
       await buildSections(); // isi kiri
@@ -280,24 +334,14 @@
             btn.className = "sec-btn px-2 py-2 rounded hover:bg-neutral-50";
             btn.textContent = item.title || 'Untitled';
             btn.addEventListener('click', async () => {
-              // reset active state
               sectionsList.querySelectorAll('.sec-btn').forEach(b => b.classList.remove('active'));
               btn.classList.add('active');
-              
 
-              // Get destination of the bookmark (page index)
-              const dest = await pdfDoc.getDestination(item.dest);
-              const pageIndex = await pdfDoc.getPageIndex(dest[0]);
+              const { pageIndex, yPdf, destType } = await resolveDest(item);
+              if (pageIndex === null) return; // bookmark rusak/ tidak punya target
 
-              let yPdf = null;
-              if (Array.isArray(dest) && typeof dest[3] === 'number') {
-                yPdf = dest[3];
-              } else if (Array.isArray(dest) && typeof dest[2] === 'number') {
-                yPdf = dest[2];
-              }
-
-              // Call the function to scroll and highlight
-              goTo(pageIndex + 1, yPdf);  // Scroll ke halaman dan posisi y
+              // Jika yPdf null (Fit, dsb.), tetap scroll ke atas halaman
+              goTo(pageIndex + 1, yPdf, destType);
             });
             li.appendChild(btn);
             sectionsList.appendChild(li);
