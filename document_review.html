@@ -19,7 +19,6 @@
   .main-container {
     display: grid;
     grid-template-columns: 3fr 6fr 3fr; /* Kolom untuk Sections, PDF Viewer, Comments */
-    /* grid-template-rows: 1fr auto 1fr; Sesuaikan tinggi untuk content */
     height: 80vh; /* Full screen height */
     gap: 1rem;
   }
@@ -208,15 +207,26 @@
     function goTo(pageNum, yPdf = null) {
       const target = document.getElementById(`page-${pageNum}`);
       if (!target) return;
+      
+      // Scroll secara otomatis ke halaman yang tepat
       target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      
       const pg = pages[pageNum - 1];
+
       if (yPdf !== null && !isNaN(yPdf)) {
         const yCanvas = pg.canvas.height - (yPdf * scale);
         const line = Math.max(1, Math.min(pg.totalLines, Math.round(yCanvas / lineHeight)));
-        highlightLine(pageNum - 1, line); setCurrent(pageNum, line);
+        
+        highlightLine(pageNum - 1, line); // Highlight bagian yang relevan
+        setCurrent(pageNum, line);  // Menampilkan informasi page dan line
       }
-      pg.canvas.classList.add('flash'); setTimeout(() => pg.canvas.classList.remove('flash'), 600);
+      
+      // Memberikan efek flash pada halaman untuk menandai
+      pg.canvas.classList.add('flash');
+      setTimeout(() => pg.canvas.classList.remove('flash'), 600);
     }
+
+
 
     /* ===== Render PDF ===== */
     async function renderPDF(buf) {
@@ -276,6 +286,9 @@
               // reset active state
               sectionsList.querySelectorAll('.sec-btn').forEach(b => b.classList.remove('active'));
               btn.classList.add('active');
+              
+
+              // Get destination of the bookmark (page index)
               const dest = await pdfDoc.getDestination(item.dest);
               const pageIndex = await pdfDoc.getPageIndex(dest[0]);
 
@@ -286,9 +299,8 @@
                 yPdf = dest[2];
               }
 
-              goTo(pageIndex + 1, yPdf);
-              // Highlight section after navigation
-              highlightText(pageIndex + 1, getTextPositionsForSection(item.title));
+              // Call the function to scroll and highlight
+              goTo(pageIndex + 1, yPdf);  // Scroll ke halaman dan posisi y
             });
             li.appendChild(btn);
             sectionsList.appendChild(li);
