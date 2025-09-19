@@ -12,7 +12,6 @@
     margin: 0;
     padding: 0;
     height: 100%;
-    /* overflow: hidden; Menyembunyikan scroll di luar */
   }
 
   /* Menjamin agar area-panel tidak menggantung dan mengisi seluruh tinggi layar */
@@ -226,8 +225,6 @@
       setTimeout(() => pg.canvas.classList.remove('flash'), 600);
     }
 
-
-
     /* ===== Render PDF ===== */
     async function renderPDF(buf) {
       pages.length = 0;
@@ -341,10 +338,31 @@
       }
     }
 
-    function getTextPositionsForSection(sectionTitle) {
-      return [
-        { x: 10, y: 20, width: 100, height: 20 },
-      ];
+    async function getTextPositionsForSection(pageNum, sectionTitle) {
+      const page = await pdfDoc.getPage(pageNum);
+      const textContent = await page.getTextContent();
+      const viewport = page.getViewport({ scale });
+
+      const positions = [];
+      textContent.items.forEach(item => {
+        if (item.str && item.str.trim().toLowerCase().includes(sectionTitle.toLowerCase())) {
+          const tx = pdfjsLib.Util.transform(
+            viewport.transform,
+            item.transform
+          );
+          const x = tx[4];
+          const y = tx[5];
+          const fontSize = Math.abs(item.transform[0]);
+          positions.push({
+            x,
+            y: viewport.height - y,   // konversi koordinat PDF ke canvas
+            width: item.width * scale,
+            height: fontSize
+          });
+        }
+      });
+
+      return positions;
     }
 
     /* ===== Upload ===== */
